@@ -1,0 +1,131 @@
+# Customise this file, documentation can be found here:
+# https://docs.fastlane.tools/actions/
+# All available actions: https://docs.fastlane.tools/actions
+# can also be listed using the `fastlane actions` command
+
+# Change the syntax highlighting to Ruby
+# All lines starting with a # are ignored when running `fastlane`
+
+# If you want to automatically update fastlane if a new version is available:
+# update_fastlane
+
+# This is the minimum version number required.
+# Update this, if you use features of a newer version
+fastlane_version "2.62.0"
+
+default_platform :ios
+
+platform :ios do
+  before_all do
+    # ENV["SLACK_URL"] = "https://hooks.slack.com/services/..."
+    # cocoapods
+    # carthage
+  end
+
+  desc "Runs all the tests"
+  lane :test do
+    scan
+  end
+
+  desc "Submit a new Beta Build to Apple TestFlight"
+  desc "This will also make sure the profile is up to date"
+  lane :beta do
+    # match(type: "appstore") # more information: https://codesigning.guide
+    gym # Build your app - more options available
+    pilot
+
+    # sh "your_script.sh"
+    # You can also use other beta testing services here (run `fastlane actions`)
+  end
+
+  desc "Deploy a new version to the App Store"
+  lane :release do
+    # match(type: "appstore")
+    # snapshot
+    gym # Build your app - more options available
+    deliver(force: true)
+    # frameit
+  end
+
+  lane :update_pod do
+    pod_update(podfile: ENV["POD_FILE"], repo: ENV["POD_REPO"])
+  end
+
+  lane :install_pod do
+    cocoapods(clean: true, podfile: ENV["POD_FILE"])
+  end
+
+  lane :lint_pod do |options|
+    POD_SOURCES = ENV["POD_SOURCES"].split(",")
+    pod_lib_lint(
+      fail_fast: true,
+      allow_warnings: true,
+      quick: options[:quick] || false,
+      use_libraries: true,
+      sources: POD_SOURCES
+    )
+  end
+
+  # You can define as many lanes as you want
+    lane :push_pod do |options|
+    VERSION = options[:version] || version_get_podspec(path: ENV["POD_SPEC"])
+    OLD_VERSION = nil
+    POD_SOURCES = ENV["POD_SOURCES"].split(",")
+    # 确认是 master 分支
+    ensure_git_branch
+    # 确认当前分支已经提交
+    ensure_git_status_clean
+    # git pull
+    git_pull
+    # 本地检测
+    lint_pod(quick: true)
+    # 检查 tag 是否已经存在，存在则删除
+    if git_tag_exists(tag: VERSION)
+      if prompt(text: "#{VERSION}版本已经存在，是否删除旧版本？", ci_input: "y", boolean: true)
+        OLD_VERSION = VERSION
+      end
+      verarray = VERSION.split('.')
+      verarray[-1] = verarray[-1].to_i + 1
+      VERSION = verarray.join('.')
+      # podspec升级版本号
+      version_bump_podspec(path: ENV["POD_SPEC"], version_number: VERSION)
+      # 提交代码
+      git_add(path: ".")
+      git_commit(path: ".", message: "自动升级版本: #{VERSION}")
+      push_to_git_remote
+    end
+    # 添加tag
+    add_git_tag(tag: VERSION)
+    # 删除旧tag
+    if OLD_VERSION
+      remove_git_tag(tag: OLD_VERSION)
+    end
+    # 提交 tag
+    push_git_tags
+
+    pod_push(path: ENV["POD_SPEC"], repo: ENV["POD_REPO"], sources: POD_SOURCES,
+      allow_warnings: true, use_libraries: true)
+  end
+
+  after_all do |lane|
+    # This block is called, only if the executed lane was successful
+
+    # slack(
+    #   message: "Successfully deployed new App Update."
+    # )
+  end
+
+  error do |lane, exception|
+    # slack(
+    #   message: exception.message,
+    #   success: false
+    # )
+  end
+end
+
+
+# More information about multiple platforms in fastlane: https://github.com/fastlane/fastlane/blob/master/fastlane/docs/Platforms.md
+# All available actions: https://docs.fastlane.tools/actions
+
+# fastlane reports which actions are used. No personal data is recorded.
+# Learn more at https://github.com/fastlane/fastlane#metrics
